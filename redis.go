@@ -2,14 +2,15 @@ package redis
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/go-oauth2/oauth2/v4"
 	"github.com/go-oauth2/oauth2/v4/models"
-	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
 	jsoniter "github.com/json-iterator/go"
+	"github.com/redis/go-redis/v9"
 )
 
 var (
@@ -70,7 +71,7 @@ type TokenStore struct {
 	ns  string
 }
 
-// Close close the store
+// Close the store
 func (s *TokenStore) Close() error {
 	return s.cli.Close()
 }
@@ -81,7 +82,7 @@ func (s *TokenStore) wrapperKey(key string) string {
 
 func (s *TokenStore) checkError(result redis.Cmder) (bool, error) {
 	if err := result.Err(); err != nil {
-		if err == redis.Nil {
+		if errors.Is(err, redis.Nil) {
 			return true, nil
 		}
 		return false, err
@@ -120,10 +121,10 @@ func (s *TokenStore) removeToken(ctx context.Context, tokenString string, isRefr
 	if isRefresh {
 		checkToken = token.GetAccess()
 	}
-	iresult := s.cli.Exists(ctx, s.wrapperKey(checkToken))
-	if err := iresult.Err(); err != nil && err != redis.Nil {
+	iResult := s.cli.Exists(ctx, s.wrapperKey(checkToken))
+	if err := iResult.Err(); err != nil && !errors.Is(err, redis.Nil) {
 		return err
-	} else if iresult.Val() == 0 {
+	} else if iResult.Val() == 0 {
 		return s.remove(ctx, basicID)
 	}
 
@@ -139,7 +140,7 @@ func (s *TokenStore) parseToken(result *redis.StringCmd) (oauth2.TokenInfo, erro
 
 	buf, err := result.Bytes()
 	if err != nil {
-		if err == redis.Nil {
+		if errors.Is(err, redis.Nil) {
 			return nil, nil
 		}
 		return nil, err
@@ -171,7 +172,7 @@ func (s *TokenStore) getBasicID(ctx context.Context, token string) (string, erro
 	return s.parseBasicID(result)
 }
 
-// Create Create and store the new token information
+// Create and store the new token information
 func (s *TokenStore) Create(ctx context.Context, info oauth2.TokenInfo) error {
 	ct := time.Now()
 	jv, err := jsonMarshal(info)
@@ -184,19 +185,19 @@ func (s *TokenStore) Create(ctx context.Context, info oauth2.TokenInfo) error {
 		pipe.Set(ctx, s.wrapperKey(code), jv, info.GetCodeExpiresIn())
 	} else {
 		basicID := uuid.Must(uuid.NewRandom()).String()
-		aexp := info.GetAccessExpiresIn()
-		rexp := aexp
+		aExp := info.GetAccessExpiresIn()
+		rExp := aExp
 
 		if refresh := info.GetRefresh(); refresh != "" {
-			rexp = info.GetRefreshCreateAt().Add(info.GetRefreshExpiresIn()).Sub(ct)
-			if aexp.Seconds() > rexp.Seconds() {
-				aexp = rexp
+			rExp = info.GetRefreshCreateAt().Add(info.GetRefreshExpiresIn()).Sub(ct)
+			if aExp.Seconds() > rExp.Seconds() {
+				aExp = rExp
 			}
-			pipe.Set(ctx, s.wrapperKey(refresh), basicID, rexp)
+			pipe.Set(ctx, s.wrapperKey(refresh), basicID, rExp)
 		}
 
-		pipe.Set(ctx, s.wrapperKey(info.GetAccess()), basicID, aexp)
-		pipe.Set(ctx, s.wrapperKey(basicID), jv, rexp)
+		pipe.Set(ctx, s.wrapperKey(info.GetAccess()), basicID, aExp)
+		pipe.Set(ctx, s.wrapperKey(basicID), jv, rExp)
 	}
 
 	if _, err := pipe.Exec(ctx); err != nil {

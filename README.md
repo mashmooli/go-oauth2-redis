@@ -5,7 +5,7 @@
 ## Install
 
 ``` bash
-$ go get github.com/go-oauth2/redis/v5
+$ go get github.com/mashmooli/go-oauth2-redis/v5
 ```
 
 ## Usage
